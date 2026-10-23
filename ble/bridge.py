@@ -24,11 +24,20 @@ from eflib.pb import pd335_sys_pb2
 from eflib.logging_util import LogOptions
 from secure_store import load_user_id
 
-def load_serial():
-    """Serial of the unit to monitor: ECOFLOW_SERIAL, else serial.txt written by scan.py --save."""
+def load_serial(path=ROOT / "serial.txt"):
+    """Serial of the unit to monitor: ECOFLOW_SERIAL, else serial.txt written by scan.py --save.
+
+    Returns "" when nothing usable is configured; the bridge then refuses to start.
+    """
     serial = os.environ.get("ECOFLOW_SERIAL", "").strip()
-    if not serial and (ROOT / "serial.txt").exists():
-        serial = (ROOT / "serial.txt").read_text().strip()
+    if not serial and path.exists():
+        raw = path.read_bytes()
+        # Tolerate hand-written files: PowerShell 5 `>` writes UTF-16, Notepad may add a BOM.
+        encoding = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
+        serial = raw.decode(encoding, errors="replace").strip()
+    # Advertised serials are up to 16 ASCII letters/digits.
+    if not (serial.isascii() and serial.isalnum() and len(serial) <= 16):
+        return ""
     return serial
 
 
@@ -332,8 +341,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--probe", action="store_true", help="Test two read-only connect/read/disconnect cycles")
     args = parser.parse_args()
-    if not SERIAL:
-        raise SystemExit("No EcoFlow serial configured. Run scan.py --save, or set ECOFLOW_SERIAL.")
     handler = RotatingFileHandler(ROOT / "bridge.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s", handlers=[handler, logging.StreamHandler()])
+    if not SERIAL:
+        # Logged as well: under the SYSTEM task (pythonw) there is no console to show the exit message.
+        LOG.error("No valid EcoFlow serial configured. Run scan.py --save, or set ECOFLOW_SERIAL.")
+        raise SystemExit("No valid EcoFlow serial configured. Run scan.py --save, or set ECOFLOW_SERIAL.")
     asyncio.run(main(args.probe))

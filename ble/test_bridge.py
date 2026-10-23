@@ -1,11 +1,16 @@
 import asyncio
+import os
 from pathlib import Path
+import tempfile
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.parse
 import urllib.request
 
-from bridge import Telemetry, nut_client
+from bridge import Telemetry, load_serial, nut_client
+
+NUT_BIN = Path(r"C:\NUT\bin")
 
 
 class SafetyTests(unittest.TestCase):
@@ -60,6 +65,34 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(self.state.nut_values(105)["ups.status"], "OL")
 
 
+class SerialConfigTests(unittest.TestCase):
+    def load(self, content, env=None):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "serial.txt"
+            if content is not None:
+                path.write_bytes(content)
+            environment = {key: value for key, value in os.environ.items() if key != "ECOFLOW_SERIAL"}
+            if env is not None:
+                environment["ECOFLOW_SERIAL"] = env
+            with mock.patch.dict(os.environ, environment, clear=True):
+                return load_serial(path)
+
+    def test_missing_serial_is_empty(self):
+        self.assertEqual(self.load(None), "")
+
+    def test_file_variants(self):
+        self.assertEqual(self.load(b"ABC123\r\n"), "ABC123")
+        self.assertEqual(self.load(b"\xef\xbb\xbfABC123"), "ABC123")
+        self.assertEqual(self.load("ABC123\r\n".encode("utf-16")), "ABC123")
+
+    def test_environment_wins_and_garbage_is_rejected(self):
+        self.assertEqual(self.load(b"ABC123", env="XYZ789"), "XYZ789")
+        self.assertEqual(self.load(b"not a serial"), "")
+        self.assertEqual(self.load(b"A" * 17), "")
+
+
+@unittest.skipUnless((NUT_BIN / "upsc.exe").exists() and (NUT_BIN / "dummy-ups.exe").exists(),
+                     r"needs NUT for Windows in C:\NUT")
 class NutProtocolTests(unittest.IsolatedAsyncioTestCase):
     async def test_windows_nut_repeater_reads_source(self):
         state = Telemetry()
