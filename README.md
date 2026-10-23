@@ -61,6 +61,12 @@ ships in Windows, registers it as a logon task, and flips the taskbar "always sh
 
 **Interface 0 only.** Interfaces 1/2 are the serial port; leave them on `usbser` if you ever want Power Manager.
 
+## USB link died? Use Bluetooth instead
+
+On some units the USB HID link drops out after a while and stays gone until a power cycle. [`ble/`](ble/) is a
+read-only Bluetooth LE bridge that feeds the same NUT service, so the tray, `upsmon` and `upsc` keep working
+without the USB cable. See [`ble/README.md`](ble/README.md).
+
 ## Uninstall
 
 ```powershell
@@ -76,6 +82,7 @@ Use `-RestoreHidDriver` after an EcoFlow firmware update to check whether the na
 ```
 Install.ps1                 one-shot installer (idempotent)
 Uninstall.ps1
+ble/                        optional Bluetooth bridge (no USB needed)
 tray/NutTray.cs             tray app — single C# file, built by the installer with csc.exe
 docs/Dump-UsbDescriptors.ps1  read a USB device's config/HID descriptors via the hub IOCTL (no admin, no driver)
 ```

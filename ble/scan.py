@@ -1,0 +1,43 @@
+"""List nearby EcoFlow units (BLE manufacturer id 0xB5B5) and optionally save one serial.
+
+    python scan.py            list EcoFlow units only; unrelated devices are never printed
+    python scan.py --save     if exactly one unit is found, write its serial to serial.txt
+"""
+import argparse
+import asyncio
+from pathlib import Path
+
+from bleak import BleakScanner
+
+ROOT = Path(__file__).resolve().parent
+
+
+async def main(save):
+    found = {}
+
+    def detected(device, adv):
+        data = adv.manufacturer_data.get(0xB5B5)
+        if data:
+            serial = data[1:17].strip(b"\0").decode("ascii", errors="replace")
+            found[serial] = (adv.local_name or device.name, adv.rssi)
+
+    async with BleakScanner(detection_callback=detected):
+        await asyncio.sleep(20)
+    if not found:
+        print("No EcoFlow advertised in 20 s. Close the phone app (the unit allows one BLE connection).")
+        return 1
+    for serial, (name, rssi) in found.items():
+        print(f"{serial}  {name}  rssi {rssi}")
+    if save:
+        if len(found) != 1:
+            print("More than one unit found; write the one you want into serial.txt yourself.")
+            return 1
+        (ROOT / "serial.txt").write_text(next(iter(found)), encoding="ascii")
+        print("Saved serial.txt")
+    return 0
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--save", action="store_true")
+    raise SystemExit(asyncio.run(main(parser.parse_args().save)))
