@@ -42,8 +42,16 @@ try {
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     }
     New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
+    # Ordinary users can create folders under ProgramData. If one pre-created this folder, it would own it and
+    # could later change its ACL, so take ownership for Administrators and discard any code staged inside.
+    & icacls.exe $installRoot /setowner '*S-1-5-32-544' /T /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not take ownership of install directory.' }
     & icacls.exe $installRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' "*$($userSid):(OI)(CI)RX" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not protect install directory.' }
+    foreach ($stale in @('runtime', 'vendor')) {
+        $stalePath = Join-Path $installRoot $stale
+        if (Test-Path -LiteralPath $stalePath) { Remove-Item -LiteralPath $stalePath -Recurse -Force }
+    }
     $runtimeSource = (& (Join-Path $sourceRoot '.venv\Scripts\python.exe') -c 'import sys; print(sys.base_prefix)').Trim()
     if (-not (Test-Path -LiteralPath (Join-Path $runtimeSource 'python.exe'))) { throw 'Python runtime not found.' }
     $runtime = Join-Path $installRoot 'runtime'
@@ -61,6 +69,9 @@ try {
     New-Item -ItemType Directory -Path $eflibTarget -Force | Out-Null
     Get-ChildItem -LiteralPath (Join-Path $sourceRoot 'vendor\ha-ef-ble\custom_components\ef_ble\eflib') | Copy-Item -Destination $eflibTarget -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $sourceRoot 'vendor\ha-ef-ble\LICENSE') -Destination (Join-Path $installRoot 'vendor\ha-ef-ble\LICENSE')
+    # Make every copied/pre-existing item inherit the protected folder ACL (drops any explicit ACEs).
+    & icacls.exe (Join-Path $installRoot '*') /reset /T /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not reset permissions inside install directory.' }
     $secret = Join-Path $installRoot 'user-id.dpapi'
     Copy-Item -LiteralPath (Join-Path $sourceRoot 'machine-user-id.dpapi') -Destination $secret
     & icacls.exe $secret /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
@@ -118,8 +129,8 @@ try {
     desc = "EcoFlow DELTA 3 Plus over Bluetooth"
     pollinterval = 2
 '@
-    Set-Content -LiteralPath $nutConfig -Value $newConfig -Encoding ASCII
     $changedConfig = $true
+    Set-Content -LiteralPath $nutConfig -Value $newConfig -Encoding ASCII
     Restart-Service -Name $serviceName
     $deadline = (Get-Date).AddSeconds(40)
     $verified = $false
@@ -135,17 +146,27 @@ try {
     Write-Output 'SUCCESS: NUT is publishing live Bluetooth data. EcoFlowBLE starts at boot as SYSTEM.'
     $query | Where-Object { $_ -match '^(battery\.|ups\.status|ups\.realpower|input\.realpower|driver\.name)' } | Write-Output
     @{Installed=(Get-Date).ToString('o');Backup=$backup;Task=$taskName;Transport='Bluetooth LE';LowBatteryPercent=15} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $installRoot 'installation.json')
+    # The machine-scope copy can be decrypted by any process on this PC; only the protected install keeps one.
+    Remove-Item -LiteralPath (Join-Path $sourceRoot 'machine-user-id.dpapi') -Force -ErrorAction SilentlyContinue
 } catch {
     Write-Output "INSTALL FAILED: $($_.Exception.Message)"
     if ($changedConfig) {
-        Copy-Item -LiteralPath $backup -Destination $nutConfig -Force
-        Restart-Service -Name $serviceName
-        Write-Output 'Previous NUT configuration restored.'
+        try {
+            Copy-Item -LiteralPath $backup -Destination $nutConfig -Force
+            Write-Output "Previous NUT configuration restored from $backup."
+            Restart-Service -Name $serviceName
+        } catch {
+            Write-Output "ROLLBACK INCOMPLETE: $($_.Exception.Message). Restore $backup to $nutConfig and restart '$serviceName' manually."
+        }
     }
     foreach ($name in @($taskName, $probeName)) {
-        if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
-            Stop-ScheduledTask -TaskName $name
-            Disable-ScheduledTask -TaskName $name | Out-Null
+        try {
+            if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
+                Stop-ScheduledTask -TaskName $name
+                Disable-ScheduledTask -TaskName $name | Out-Null
+            }
+        } catch {
+            Write-Output "Could not disable scheduled task ${name}: $($_.Exception.Message)"
         }
     }
     throw
