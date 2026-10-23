@@ -122,7 +122,8 @@ if __name__ == "__main__":
     server.timeout = 1
     url = ORIGIN + ROUTE
     (ROOT / "setup-url.txt").write_text(url)
-    print("Local setup page ready.", flush=True)
+    print(f"Open this address in a browser on this PC: {url}", flush=True)
+    print("(It is also in setup-url.txt; keep it private.) The page closes after setup or 30 minutes.", flush=True)
     expires = time.monotonic() + 1800
     saved_at = None
     while time.monotonic() < expires:
