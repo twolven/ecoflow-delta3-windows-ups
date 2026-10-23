@@ -3,3 +3,11 @@
 *.log
 *.ini
 
+ble/.venv/
+ble/__pycache__/
+ble/*.dpapi
+ble/serial.txt
+ble/setup-url.txt
+ble/health.json
+ble/firmware-fields.json
+ble/*.tmp

@@ -305,7 +305,10 @@ sealed class TrayApp : IDisposable
             return;
         }
         string st = v["ups.status"];
-        int pct; if (!int.TryParse(Get(v, "battery.charge", "-1"), out pct)) pct = -1;
+        int pct = -1; double pd;
+        // Bridges such as the BLE one report fractional charge ("88.61"); int.TryParse would reject it.
+        if (double.TryParse(Get(v, "battery.charge", "-1"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out pd)
+            && !double.IsNaN(pd) && !double.IsInfinity(pd) && pd >= 0 && pd <= 100) pct = (int)Math.Round(pd);
         if (v.ContainsKey("device.model")) _model = v["device.model"];
         bool ob = Has(st, "OB"), lb = Has(st, "LB"), ol = Has(st, "OL");
         var state = lb ? State.LowBattery : ob ? State.OnBattery : ol ? State.Online : State.Unknown;

@@ -1,0 +1,3 @@
+[submodule "ble/vendor/ha-ef-ble"]
+	path = ble/vendor/ha-ef-ble
+	url = https://github.com/rabits/ha-ef-ble.git
