@@ -11,3 +11,5 @@ ble/setup-url.txt
 ble/health.json
 ble/firmware-fields.json
 ble/*.tmp
+*.log.*
+__pycache__/
